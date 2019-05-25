@@ -39,8 +39,16 @@
 #include <time.h>
 #include <unistd.h>
 
+#define MODE_RANDOM_SEED 0
+#define MODE_INCREMENT 1
+
 /* random seed used */
 unsigned int g_seed;
+
+/* test file pattern mode
+ 0 - usual random seed
+ 1 - 8 bit ascending sequences ( h2testw mode ) */
+unsigned int gopt_operation_mode = MODE_RANDOM_SEED;
 
 /* only perform read operation */
 int gopt_readonly = 0;
@@ -69,7 +77,15 @@ static inline double timestamp(void)
  * sufficient for this cause. */
 static inline uint64_t lcg_random(uint64_t *xn)
 {
-    *xn = 0x27BB2EE687B0B0FDLLU * *xn + 0xB504F32DLU;
+    if (gopt_operation_mode == MODE_RANDOM_SEED)
+    {
+      *xn = 0x27BB2EE687B0B0FDLLU * *xn + 0xB504F32DLU;
+    }
+    else
+    {
+      *xn = *xn + 1;
+    }
+
     return *xn;
 }
 
@@ -89,7 +105,7 @@ static inline void filehandle_append(int fd)
         g_filehandle_limit *= 2;
         if (g_filehandle_limit < 128) g_filehandle_limit = 128;
 
-        g_filehandle = realloc(g_filehandle, sizeof(int) * g_filehandle_limit);
+        g_filehandle = (int*) realloc(g_filehandle, sizeof(int) * g_filehandle_limit);
     }
 
     g_filehandle[ g_filehandle_size++ ] = fd;
@@ -104,10 +120,11 @@ static inline void filehandle_append(int fd)
 void print_usage(char* argv[])
 {
     fprintf(stderr,
-            "Usage: %s [-s seed] [-f files] [-S size] [-r] [-u] [-U] [-C dir]\n"
+            "Usage: %s [-s seed] [-m mode] [-f files] [-S size] [-r] [-u] [-U] [-C dir]\n"
             "\n"
             "Options: \n"
             "  -C <dir>          Change into given directory before starting work.\n"
+            "  -m <0|1>          Seed type. 0 - random seed; 1 - h2testw (ascending 8 byte sequence).\n"
             "  -f <file number>  Only write this number of 1 GiB sized files.\n"
             "  -r                Only verify existing data files with given random seed.\n"
             "  -s <random seed>  Use random seed to write or verify data files.\n"
@@ -124,10 +141,13 @@ void parse_commandline(int argc, char* argv[])
 {
     int opt;
 
-    while ((opt = getopt(argc, argv, "hs:S:f:ruUC:")) != -1) {
+    while ((opt = getopt(argc, argv, "m:hs:S:f:ruUC:")) != -1) {
         switch (opt) {
         case 's':
             g_seed = atoi(optarg);
+            break;
+        case 'm':
+            gopt_operation_mode = atoi(optarg);
             break;
         case 'S':
             gopt_file_size = atoi(optarg);
@@ -197,7 +217,14 @@ void fill_randfiles(void)
 
     if (gopt_file_limit == 0) gopt_file_limit = UINT_MAX;
 
-    printf("Writing files random-######## with seed %u\n", g_seed);
+    if (gopt_operation_mode == MODE_RANDOM_SEED)
+    {
+      printf("Writing files random-######## with seed %u\n", g_seed);
+    }
+    else
+    {
+      printf("Writing files random-########\n");
+    }
 
     while (!done && filenum < gopt_file_limit)
     {
@@ -221,7 +248,7 @@ void fill_randfiles(void)
 
         if (gopt_unlink_immediate) {
             if (unlink(filename) != 0) {
-                printf("Error unlinkin opened file %s: %s\n",
+                printf("Error unlinking opened file %s: %s\n",
                        filename, strerror(errno));
             }
         }
@@ -266,7 +293,7 @@ void fill_randfiles(void)
 
         ts2 = timestamp();
 
-        printf("Wrote %.0f MiB random data to %s with %f MiB/s\n",
+        printf("Wrote %.0f MiB data to %s with %f MiB/s\n",
                (wtotal / 1024.0 / 1024.0),
                filename,
                (wtotal / 1024.0 / 1024.0 / (ts2-ts1)));
@@ -343,7 +370,7 @@ void read_randfiles(void)
             {
                 if (block[i] != lcg_random(&rnd))
                 {
-                    printf("Mismatch to random sequence in file %s block %d at offset %lu\n",
+                    printf("Mismatch to sequence in file %s block %d at offset %lu\n",
                            filename, blocknum, (long unsigned)(i * sizeof(int)));
                     gopt_unlink_after = 0;
                     break;
@@ -357,7 +384,7 @@ void read_randfiles(void)
 
         ts2 = timestamp();
 
-        printf("Read %.0f MiB random data from %s with %f MiB/s\n",
+        printf("Read %.0f MiB data from %s with %f MiB/s\n",
                (rtotal / 1024.0 / 1024.0),
                filename,
                (rtotal / 1024.0 / 1024.0 / (ts2-ts1)));
